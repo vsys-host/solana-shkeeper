@@ -13,16 +13,22 @@ from spl.token.constants import TOKEN_PROGRAM_ID
 from solana.rpc.types import TokenAccountOpts
 from solders.system_program import TransferParams, transfer
 from spl.token.instructions import transfer as spl_token_transfer 
+from spl.token.instructions import transfer_checked as pyusd_token_transfer
 from spl.token.instructions import TransferParams as spl_token_TransferParams
 from solders.signature import Signature
 from solana.transaction import Transaction
 from solders.compute_budget import set_compute_unit_price, set_compute_unit_limit
 
 from .crypto import Crypto
+from .pyusd_transfer_params import PYUSDTransferParams
 from .logging import logger
 from .encryption import Encryption
 from .config import config,  get_token_address
 from .models import Accounts, Wallets, db
+
+
+TOKEN_2022_PROGRAM_ID: Pubkey = Pubkey.from_string("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+"""Public key that identifies the SPL token 2022 program."""
 
 
 def to_sol(amount) -> Decimal:
@@ -67,6 +73,13 @@ class Coin (Crypto):
         self.client = Client(config['FULLNODE_URL'], timeout = float(config['FULLNODE_TIMEOUT']))
         if symbol in config["TOKENS"][config["CURRENT_SOL_NETWORK"]]:
             self.token_address = config["TOKENS"][config["CURRENT_SOL_NETWORK"]][symbol]["token_address"]
+        # PYUSD needs mint address, decimals and TOKEN_2022_PROGRAM_ID instead of TOKEN_PROGRAM_ID 
+        if symbol == "SOLANA-PYUSD":
+            self.mint = Pubkey.from_string(config["TOKENS"][config["CURRENT_SOL_NETWORK"]]["SOLANA-PYUSD"]["token_address"])
+            #self.decimals = int(config["TOKENS"][config["CURRENT_SOL_NETWORK"]]["SOLANA-PYUSD"]["decimals"])
+            self.token_program_id = TOKEN_2022_PROGRAM_ID
+        else:
+            self.token_program_id = TOKEN_PROGRAM_ID
 
     def is_connected(self):
          return self.client.is_connected()
@@ -306,7 +319,7 @@ class Coin (Crypto):
         token_pub_key = Pubkey.from_string(get_token_address(self.symbol))
         fee_payer = Keypair.from_seed(self.get_secret_from_address(self.get_fee_deposit_account_address())[:32])
         token_inst = Token(self.client, token_pub_key, token_pub_key, fee_payer)
-        new_address = token_inst.create_associated_token_account(owner_key)
+        new_address = token_inst.create_associated_token_account(owner_key, token_program_id = self.token_program_id)
         return new_address
         
     def get_account_token_balance(self, owner_address) -> Decimal:
@@ -408,7 +421,7 @@ class Coin (Crypto):
                     token_pub_key = Pubkey.from_string(get_token_address(self.symbol))
                     fee_payer = Keypair.from_seed(self.get_secret_from_address(self.get_fee_deposit_account_address())[:32])
                     token_inst = Token(self.client, token_pub_key, token_pub_key, fee_payer)
-                    new_address_pubkey = token_inst.create_associated_token_account(owner_key)
+                    new_address_pubkey = token_inst.create_associated_token_account(owner_key, token_program_id = self.token_program_id)
                     new_address = str(new_address_pubkey)
                     logger.warning(f"Created new ATA {new_address} for account {payout['dest']}")
                     payout['dest'] = new_address
@@ -439,13 +452,24 @@ class Coin (Crypto):
                     dest_pub = Pubkey.from_string(token_payout_list[i * max_transfers + j]['dest'])
                     ui_amount = token_payout_list[i * max_transfers + j]['amount']
                     amount = self.to_raw_amount(ui_amount)
-                    token_transaction.add(spl_token_transfer(spl_token_TransferParams(
-                                           source=source_pub, 
-                                           dest=dest_pub, 
-                                           owner=owner_pair.pubkey(), 
-                                           program_id = TOKEN_PROGRAM_ID,
-                                           amount=amount
-                                       )))
+                    if self.symbol == "SOLANA-PYUSD":
+                        token_transaction.add(pyusd_token_transfer(PYUSDTransferParams(
+                                               source=source_pub, 
+                                               dest=dest_pub, 
+                                               owner=owner_pair.pubkey(), 
+                                               program_id = self.token_program_id,
+                                               amount=amount,
+                                               decimals=self.get_token_decimals(),
+                                               mint=self.mint,
+                                           )))
+                    else:
+                        token_transaction.add(spl_token_transfer(spl_token_TransferParams(
+                                               source=source_pub, 
+                                               dest=dest_pub, 
+                                               owner=owner_pair.pubkey(), 
+                                               program_id = self.token_program_id,
+                                               amount=amount
+                                           )))
                 result = self.client.send_transaction(token_transaction, fee_payer, owner_pair)
                 txid = str(result.value)
                 for j in range(transfer_list[i]):
@@ -509,7 +533,7 @@ class Coin (Crypto):
                 token_pub_key = Pubkey.from_string(get_token_address(self.symbol))
                 fee_payer = Keypair.from_seed(self.get_secret_from_address(self.get_fee_deposit_account_address())[:32])
                 token_inst = Token(self.client, token_pub_key, token_pub_key, fee_payer)
-                new_dest_address = str(token_inst.create_associated_token_account(owner_key))
+                new_dest_address = str(token_inst.create_associated_token_account(owner_key, token_program_id = self.token_program_id))
             else:
                 new_dest_address = associated_token_account
             source_pub = Pubkey.from_string(self.get_token_account_by_owner(account))
@@ -523,13 +547,24 @@ class Coin (Crypto):
                 token_transaction.add(set_compute_unit_limit(config['COMPUTE_UNIT_LIMIT']))
             if config['COMPUTE_UNIT_PRICE'] > 0:
                 token_transaction.add(set_compute_unit_price(config['COMPUTE_UNIT_PRICE']))
-            token_transaction.add(spl_token_transfer(spl_token_TransferParams(
-                                   source=source_pub, 
-                                   dest=dest_pub, 
-                                   owner=owner_pair.pubkey(), 
-                                   program_id = TOKEN_PROGRAM_ID,
-                                   amount=amount
-                               )))
+            if self.symbol == "SOLANA-PYUSD":
+                token_transaction.add(pyusd_token_transfer(PYUSDTransferParams(
+                                               source=source_pub, 
+                                               dest=dest_pub, 
+                                               owner=owner_pair.pubkey(), 
+                                               program_id = self.token_program_id,
+                                               amount=amount,
+                                               decimals=self.get_token_decimals(),
+                                               mint=self.mint,
+                                           )))
+            else:
+                token_transaction.add(spl_token_transfer(spl_token_TransferParams(
+                                       source=source_pub, 
+                                       dest=dest_pub, 
+                                       owner=owner_pair.pubkey(), 
+                                       program_id = self.token_program_id,
+                                       amount=amount
+                                   )))
             result = self.client.send_transaction(token_transaction, fee_payer, owner_pair)
             txid = str(result.value)
             drain_results.append({
