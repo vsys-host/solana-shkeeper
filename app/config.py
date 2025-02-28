@@ -28,7 +28,7 @@ config = {
                 'token_address': 'Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr', # https://spl-token-faucet.com/
             },
             'SOLANA-PYUSD': {
-                'token_address': 'FV6etEFawMhJrGB656y6Bb6vGfi7qicq6iNk6x86NFWT', # https://faucet.arcana.markets/
+                'token_address': 'CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM', # https://faucet.paxos.com/
             },
         },
     },   
