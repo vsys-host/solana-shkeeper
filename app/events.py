@@ -9,7 +9,7 @@ from .coin import Coin, get_all_accounts
 
 
 def log_loop(last_checked_block, check_interval):
-    from .tasks import walletnotify_shkeeper, drain_account
+    from .tasks import drain_account
     from app import create_app
     app = create_app()
     app.app_context().push()
@@ -66,7 +66,7 @@ def log_loop(last_checked_block, check_interval):
                                         drain_account.delay(token_dict[balance["mint"]], balance['owner'])
                     symbols_set = set(symbols)
                     for symbol in symbols_set:
-                        walletnotify_shkeeper.delay(symbol, transaction_json['transaction']['signatures'][0])
+                        coin.walletnotify_shkeeper(symbol, transaction_json['transaction']['signatures'][0])
                 return 1
             with ThreadPoolExecutor(max_workers=config['EVENTS_MAX_THREADS_NUMBER']) as executor:
                 try:

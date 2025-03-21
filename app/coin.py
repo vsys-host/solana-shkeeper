@@ -1,5 +1,6 @@
 from decimal import Decimal
 from flask import current_app as app
+import requests as rq
 import time
 import json
 import copy
@@ -121,6 +122,24 @@ class Coin (Crypto):
         min_balance = int(self.client.get_minimum_balance_for_rent_exemption(config['ATA_ACCOUNT_SIZE']).value)
         min_balance = to_sol(min_balance)
         return min_balance
+    
+    def walletnotify_shkeeper(self, symbol, txid) -> bool:
+        """Notify SHKeeper about transaction"""
+        logger.warning(f"Notifying about {symbol}/{txid}")
+        while True:
+            try:
+                r = rq.post(
+                        f'http://{config["SHKEEPER_HOST"]}/api/v1/walletnotify/{symbol}/{txid}',
+                        headers={'X-Shkeeper-Backend-Key': config['SHKEEPER_KEY']}).json()
+                if r["status"] == "success":
+                    logger.warning(f"The notification about {symbol}/{txid} was successful")
+                    return True
+                else:
+                    logger.warning(f"Failed to notify SHKeeper about {symbol}/{txid}, received response: {r}")
+                    time.sleep(5)
+            except Exception as e:
+                logger.warning(f'Shkeeper notification failed for {symbol}/{txid}: {e}')
+                time.sleep(10)
     
     def parse_transaction(self, txid) -> list:
         "Return list of related transactions details for SHKeeper"
