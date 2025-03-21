@@ -47,21 +47,6 @@ def post_payout_results(data, symbol):
 
 
 @celery.task()
-def walletnotify_shkeeper(symbol, txid):
-    logger.warning(f"Notifying about {symbol}/{txid}")
-    while True:
-        try:
-            r = rq.post(
-                    f'http://{config["SHKEEPER_HOST"]}/api/v1/walletnotify/{symbol}/{txid}',
-                    headers={'X-Shkeeper-Backend-Key': config['SHKEEPER_KEY']}
-                )
-            return r
-        except Exception as e:
-            logger.warning(f'Shkeeper notification failed for {symbol}/{txid}: {e}')
-            time.sleep(10)
-
-
-@celery.task()
 def refresh_balances():
     updated = 0
 
