@@ -6,18 +6,21 @@ import json
 import copy
 import math
 
+import solders.rpc.errors
 from solana.rpc.api import Client
-from solana.rpc.api import Keypair
-from solana.rpc.api import Pubkey
+from solders.keypair import Keypair
+from solders.pubkey import Pubkey
 from spl.token.client import Token
-from spl.token.constants import TOKEN_PROGRAM_ID
+from solders.hash import Hash
+from solders.message import MessageV0
+from spl.token.constants import TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID
 from solana.rpc.types import TokenAccountOpts
 from solders.system_program import TransferParams, transfer
 from spl.token.instructions import transfer as spl_token_transfer 
 from spl.token.instructions import transfer_checked as pyusd_token_transfer
 from spl.token.instructions import TransferParams as spl_token_TransferParams
 from solders.signature import Signature
-from solana.transaction import Transaction
+from solders.transaction import VersionedTransaction
 from solders.compute_budget import set_compute_unit_price, set_compute_unit_limit
 
 from .crypto import Crypto
@@ -27,9 +30,6 @@ from .encryption import Encryption
 from .config import config,  get_token_address
 from .models import Accounts, Wallets, db
 
-
-TOKEN_2022_PROGRAM_ID: Pubkey = Pubkey.from_string("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
-"""Public key that identifies the SPL token 2022 program."""
 
 
 def to_sol(amount) -> Decimal:
@@ -98,10 +98,16 @@ class Coin (Crypto):
         return int(self.client.get_slot().value)
 
     def get_block(self, slot, encoding='json', max_supported_transaction_version=0 ):
-        return self.client.get_block(int(slot), encoding, max_supported_transaction_version).value
+        data = self.client.get_block(int(slot), encoding, max_supported_transaction_version).value
+        return data
 
     def get_blocks(self, start_slot, end_slot):
-        return self.client.get_blocks(int(start_slot), int(end_slot)).value
+        data = self.client.get_blocks(int(start_slot), int(end_slot))
+        if not isinstance(data, solders.rpc.errors.InvalidParamsMessage):
+            return data.value
+        else:
+            return data.message
+
 
     def get_block_time(self, block_number):
         return int(self.client.get_block_time(int(block_number)).value)
@@ -148,9 +154,7 @@ class Coin (Crypto):
             transaction = self.get_transaction(txid)
             trx = json.loads(transaction.to_json())
             slot = int(trx['slot'])
-           # tx_id = str(trx["transaction"]["signatures"][0])
             account_keys = trx["transaction"]["message"]["accountKeys"]
-           # instructions = trx["transaction"]["message"]["instructions"]
             pre_balances =  trx["meta"]["preBalances"]
             fee = trx["meta"]["fee"]
             post_balances =  trx["meta"]["postBalances"]
@@ -384,25 +388,35 @@ class Coin (Crypto):
                         transfer_list.append(len(payout_list))
 
             for i in range(num_of_transaction):
-                transaction = Transaction()
-                transaction.fee_payer = sender_keypair.pubkey()
-
-                if config['COMPUTE_UNIT_LIMIT'] > 0:
-                    transaction.add(set_compute_unit_limit(config['COMPUTE_UNIT_LIMIT']))
-                if config['COMPUTE_UNIT_PRICE'] > 0:
-                    transaction.add(set_compute_unit_price(config['COMPUTE_UNIT_PRICE']))
     
                 # for payout in payout_list:
+                instructions = []
                 for j in range(transfer_list[i]):
                     amount = int(to_lamports(Decimal(payout_list[i * max_transfers + j]['amount'])))
-                    transaction.add(transfer(TransferParams(
-                        from_pubkey=sender_keypair.pubkey(),
-                        to_pubkey=Pubkey.from_string(payout_list[i * max_transfers + j]['dest']),
-                        lamports=amount,
-                        )))           
-                result = self.client.send_transaction(transaction, sender_keypair).to_json()
+                    instructions.append(transfer(TransferParams(
+                            from_pubkey=sender_keypair.pubkey(),
+                            to_pubkey=Pubkey.from_string(payout_list[i * max_transfers + j]['dest']),
+                            lamports=amount,
+                            )))
+                    
+                if config['COMPUTE_UNIT_LIMIT'] > 0:
+                    instructions.append(set_compute_unit_limit(config['COMPUTE_UNIT_LIMIT']))
+                if config['COMPUTE_UNIT_PRICE'] > 0:
+                    instructions.append(set_compute_unit_price(config['COMPUTE_UNIT_PRICE']))
+
+                blockhash = self.get_latest_blockhash().blockhash
+                msg = MessageV0.try_compile(
+                    payer=sender_keypair.pubkey(),
+                    instructions = instructions,
+                    address_lookup_table_accounts = [],
+                    recent_blockhash=blockhash,
+                )
+
+                tx = VersionedTransaction(msg, [sender_keypair])
+                result = self.client.send_transaction(tx).to_json()
                 logger.warning(f"Result of transaction {result}")
                 signature = json.loads(result)['result']
+
                 for j in range(transfer_list[i]):
                 # for payout in payout_list:
                     payout_results.append({
@@ -437,10 +451,10 @@ class Coin (Crypto):
                 if not associated_token_account:
                     logger.warning(f"There is not ATA for {payout['dest']}, creating")
                     owner_key = Pubkey.from_string(payout['dest'])
-                    token_pub_key = Pubkey.from_string(get_token_address(self.symbol))
+                    token_pub_key = Pubkey.from_string(self.token_address)
                     fee_payer = Keypair.from_seed(self.get_secret_from_address(self.get_fee_deposit_account_address())[:32])
-                    token_inst = Token(self.client, token_pub_key, token_pub_key, fee_payer)
-                    new_address_pubkey = token_inst.create_associated_token_account(owner_key, token_program_id = self.token_program_id)
+                    token_inst = Token(self.client, token_pub_key, self.token_program_id, fee_payer)
+                    new_address_pubkey = str(token_inst.create_associated_token_account(owner_key))
                     new_address = str(new_address_pubkey)
                     logger.warning(f"Created new ATA {new_address} for account {payout['dest']}")
                     payout['dest'] = new_address
@@ -461,36 +475,50 @@ class Coin (Crypto):
                     else:
                         transfer_list.append(len(token_payout_list))
             for i in range(num_of_transaction):
-                token_transaction = Transaction(fee_payer=fee_payer.pubkey())
-                if config['COMPUTE_UNIT_LIMIT'] > 0:
-                    token_transaction.add(set_compute_unit_limit(config['COMPUTE_UNIT_LIMIT']))
-                if config['COMPUTE_UNIT_PRICE'] > 0:
-                    token_transaction.add(set_compute_unit_price(config['COMPUTE_UNIT_PRICE']))
+                token_instructions = []
 
                 for j in range(transfer_list[i]):
                     dest_pub = Pubkey.from_string(token_payout_list[i * max_transfers + j]['dest'])
                     ui_amount = token_payout_list[i * max_transfers + j]['amount']
                     amount = self.to_raw_amount(ui_amount)
+                   
                     if self.symbol == "SOLANA-PYUSD":
-                        token_transaction.add(pyusd_token_transfer(PYUSDTransferParams(
-                                               source=source_pub, 
-                                               dest=dest_pub, 
-                                               owner=owner_pair.pubkey(), 
-                                               program_id = self.token_program_id,
-                                               amount=amount,
-                                               decimals=self.get_token_decimals(),
-                                               mint=self.mint,
-                                           )))
+                        token_instructions.append(pyusd_token_transfer(PYUSDTransferParams(
+                                                       source=source_pub, 
+                                                       dest=dest_pub, 
+                                                       owner=owner_pair.pubkey(), 
+                                                       program_id = self.token_program_id,
+                                                       amount=amount,
+                                                       decimals=self.get_token_decimals(),
+                                                       mint=self.mint,
+                                                   )))
                     else:
-                        token_transaction.add(spl_token_transfer(spl_token_TransferParams(
+                        token_instructions.append(spl_token_transfer(spl_token_TransferParams(
                                                source=source_pub, 
                                                dest=dest_pub, 
                                                owner=owner_pair.pubkey(), 
                                                program_id = self.token_program_id,
                                                amount=amount
                                            )))
-                result = self.client.send_transaction(token_transaction, fee_payer, owner_pair)
-                txid = str(result.value)
+                if config['COMPUTE_UNIT_LIMIT'] > 0:
+                    token_instructions.append(set_compute_unit_limit(config['COMPUTE_UNIT_LIMIT']))
+                if config['COMPUTE_UNIT_PRICE'] > 0:
+                    token_instructions.append(set_compute_unit_price(config['COMPUTE_UNIT_PRICE']))
+                
+                blockhash = self.get_latest_blockhash().blockhash
+    
+                msg = MessageV0.try_compile(
+                    payer=fee_payer.pubkey(),
+                    instructions = token_instructions,
+                    address_lookup_table_accounts = [],
+                    recent_blockhash=blockhash,
+                )
+                tx = VersionedTransaction(msg, [owner_pair])
+    
+                result = self.client.send_transaction(tx).to_json()
+                result_json = json.loads(result)
+                logger.warning(f"Result of transaction {result}")
+                txid = str(result_json["result"])
                 for j in range(transfer_list[i]):
                     payout_results.append({
                             "dest": payout_list[i * max_transfers + j]['dest'],
@@ -511,20 +539,26 @@ class Coin (Crypto):
                 return False
             amount = int(to_lamports(sol_ui_amount) - transfer_fee)
             sender_keypair = Keypair.from_seed(self.get_secret_from_address(account)[:32])
-            transaction = Transaction()
-            transaction.fee_payer = sender_keypair.pubkey()
-            if config['COMPUTE_UNIT_LIMIT'] > 0:
-                transaction.add(set_compute_unit_limit(config['COMPUTE_UNIT_LIMIT']))
-            if config['COMPUTE_UNIT_PRICE'] > 0:
-                transaction.add(set_compute_unit_price(config['COMPUTE_UNIT_PRICE']))
-            logger.warning(f'Draining {amount} lamports from {account} to {destination}')
-            transaction.add(transfer(TransferParams(
+            instructions = [transfer(TransferParams(
                 from_pubkey=sender_keypair.pubkey(),
                 to_pubkey=Pubkey.from_string(destination),
                 lamports=amount,
-                )))
+                ))]
 
-            result = self.client.send_transaction(transaction, sender_keypair).to_json()
+            if config['COMPUTE_UNIT_LIMIT'] > 0:
+                instructions.append(set_compute_unit_limit(config['COMPUTE_UNIT_LIMIT']))
+            if config['COMPUTE_UNIT_PRICE'] > 0:
+                instructions.append(set_compute_unit_price(config['COMPUTE_UNIT_PRICE']))
+            logger.warning(f'Draining {amount} lamports from {account} to {destination}')
+            blockhash = self.get_latest_blockhash().blockhash
+            msg = MessageV0.try_compile(
+                payer=sender_keypair.pubkey(),
+                instructions = instructions,
+                address_lookup_table_accounts = [],
+                recent_blockhash=blockhash,
+            )
+            tx = VersionedTransaction(msg, [sender_keypair])
+            result = self.client.send_transaction(tx).to_json()
             logger.warning(f"Result of transaction {result}")
             signature = json.loads(result)['result']
             drain_results.append({
@@ -551,8 +585,8 @@ class Coin (Crypto):
                 owner_key = Pubkey.from_string(destination)
                 token_pub_key = Pubkey.from_string(get_token_address(self.symbol))
                 fee_payer = Keypair.from_seed(self.get_secret_from_address(self.get_fee_deposit_account_address())[:32])
-                token_inst = Token(self.client, token_pub_key, token_pub_key, fee_payer)
-                new_dest_address = str(token_inst.create_associated_token_account(owner_key, token_program_id = self.token_program_id))
+                token_inst = Token(self.client, token_pub_key, self.token_program_id, fee_payer)
+                new_dest_address = str(token_inst.create_associated_token_account(owner_key))
             else:
                 new_dest_address = associated_token_account
             source_pub = Pubkey.from_string(self.get_token_account_by_owner(account))
@@ -561,13 +595,9 @@ class Coin (Crypto):
             token_pub_key = Pubkey.from_string(get_token_address(self.symbol))
             amount = self.to_raw_amount(ui_amount)
             fee_payer = Keypair.from_seed(self.get_secret_from_address(self.get_fee_deposit_account_address())[:32])
-            token_transaction = Transaction(fee_payer=fee_payer.pubkey())
-            if config['COMPUTE_UNIT_LIMIT'] > 0:
-                token_transaction.add(set_compute_unit_limit(config['COMPUTE_UNIT_LIMIT']))
-            if config['COMPUTE_UNIT_PRICE'] > 0:
-                token_transaction.add(set_compute_unit_price(config['COMPUTE_UNIT_PRICE']))
+          
             if self.symbol == "SOLANA-PYUSD":
-                token_transaction.add(pyusd_token_transfer(PYUSDTransferParams(
+                token_instructions = [pyusd_token_transfer(PYUSDTransferParams(
                                                source=source_pub, 
                                                dest=dest_pub, 
                                                owner=owner_pair.pubkey(), 
@@ -575,17 +605,35 @@ class Coin (Crypto):
                                                amount=amount,
                                                decimals=self.get_token_decimals(),
                                                mint=self.mint,
-                                           )))
+                                           ))]
             else:
-                token_transaction.add(spl_token_transfer(spl_token_TransferParams(
+                token_instructions = [spl_token_transfer(spl_token_TransferParams(
                                        source=source_pub, 
                                        dest=dest_pub, 
                                        owner=owner_pair.pubkey(), 
                                        program_id = self.token_program_id,
                                        amount=amount
-                                   )))
-            result = self.client.send_transaction(token_transaction, fee_payer, owner_pair)
-            txid = str(result.value)
+                                   ))]
+                
+            if config['COMPUTE_UNIT_LIMIT'] > 0:
+                token_instructions.append(set_compute_unit_limit(config['COMPUTE_UNIT_LIMIT']))
+            if config['COMPUTE_UNIT_PRICE'] > 0:
+                token_instructions.append(set_compute_unit_price(config['COMPUTE_UNIT_PRICE']))
+            
+            blockhash = self.get_latest_blockhash().blockhash
+
+            msg = MessageV0.try_compile(
+                payer=fee_payer.pubkey(),
+                instructions = token_instructions,
+                address_lookup_table_accounts = [],
+                recent_blockhash=blockhash,
+            )
+            tx = VersionedTransaction(msg, [owner_pair, fee_payer])
+
+            result = self.client.send_transaction(tx).to_json()
+            result_json = json.loads(result)
+            logger.warning(f"Result of transaction {result}")
+            txid = str(result_json["result"])
             drain_results.append({
                     "dest": destination,
                     "amount": float(ui_amount),

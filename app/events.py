@@ -20,6 +20,9 @@ def log_loop(last_checked_block, check_interval):
         last_block = coin.get_slot()
         if last_checked_block == '' or last_checked_block is None:
             last_checked_block = last_block	
+        # avoid too big block range
+        if int(last_block) - int(last_checked_block) > 10000:
+            last_block = int(last_checked_block) + 10000
         blocks_list = coin.get_blocks(last_checked_block, last_block)
         our_addresses = set(get_all_accounts()) 
         if last_checked_block > last_block:
