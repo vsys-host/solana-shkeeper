@@ -92,6 +92,7 @@ def log_loop(last_checked_block, check_interval):
                         else:
                             logger.warning(f"Some blocks failed, retrying chunk {blocks[0]} - {blocks[-1]}")
                 except Exception as e:
+                    raise e
                     sleep_sec = 6
                     logger.warning(f"Exception in main block scanner loop: {e}")
                     logger.warning(f"Waiting {sleep_sec} seconds before retry.")
