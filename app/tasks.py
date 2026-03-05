@@ -103,6 +103,8 @@ def refresh_balances():
                 db.session.add(pd)
                 db.session.commit()
                 db.session.close()
+            if config['DELAY_BETWEEN_ACC_BALANCE_REFRESH'] > 0:
+                time.sleep(config['DELAY_BETWEEN_ACC_BALANCE_REFRESH'])
     finally:
         with app.app_context():
             db.session.remove()

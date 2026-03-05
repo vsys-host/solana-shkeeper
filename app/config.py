@@ -36,6 +36,7 @@ config = {
     'LOGGING_LEVEL': os.environ.get('LOGGING_LEVEL', 'INFO'),
     'SQLALCHEMY_DATABASE_URI' : os.environ.get('SQLALCHEMY_DATABASE_URI', "mariadb+pymysql://root:shkeeper@mariadb/solana-shkeeper?charset=utf8mb4"),
     'UPDATE_TOKEN_BALANCES_EVERY_SECONDS': int(os.environ.get('UPDATE_TOKEN_BALANCES_EVERY_SECONDS', 3600)),
+    'DELAY_BETWEEN_ACC_BALANCE_REFRESH': float(os.environ.get('DELAY_BETWEEN_ACC_BALANCE_REFRESH', '0')),  # in seconds, use float for miliseconds
     'API_USERNAME': os.environ.get('SOL_USERNAME', 'shkeeper'),
     'API_PASSWORD': os.environ.get('SOL_PASSWORD', 'shkeeper'),
     'SHKEEPER_KEY': os.environ.get('SHKEEPER_BACKEND_KEY', 'shkeeper'),
