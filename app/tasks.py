@@ -116,11 +116,23 @@ def refresh_balances(self):
 @celery.task(bind=True)
 @skip_if_running
 def drain_account(self, symbol, account):
-    logger.warning(f"Start draining from account {account} crypto {symbol}")
+    logger.warning("Draining to fee-deposit account is disabled")
+    # logger.warning(f"Start draining from account {account} crypto {symbol}")
+    # inst = Coin(symbol)
+    # destination = inst.get_fee_deposit_account_address()
+    # if destination == account:
+    #     logger.warning("Fee-deposit account, skip draining")
+    #     return False
+    # results = inst.drain_account(account, destination)
+    # return results
+
+@celery.task(bind=True)
+@skip_if_running
+def withdraw_to_external_wallet_task(self, symbol, account, destination):
+    logger.warning(f"Start custom draining from account {account} crypto {symbol} to {destination}")
     inst = Coin(symbol)
-    destination = inst.get_fee_deposit_account_address()
     if destination == account:
-        logger.warning("Fee-deposit account, skip draining")
+        logger.warning("Source and destination are the same, skip")
         return False
     results = inst.drain_account(account, destination)
     return results
