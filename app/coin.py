@@ -72,6 +72,7 @@ class Coin (Crypto):
         self.symbol = symbol        
         self.fullnode = config["FULLNODE_URL"]
         self.client = Client(config['FULLNODE_URL'], timeout = float(config['FULLNODE_TIMEOUT']))
+        self.priority_client = Client(config['PRIORITY_FULLNODE_URL'], timeout = float(config['PRIORITY_FULLNODE_TIMEOUT']))
         if symbol in config["TOKENS"][config["CURRENT_SOL_NETWORK"]]:
             self.token_address = config["TOKENS"][config["CURRENT_SOL_NETWORK"]][symbol]["token_address"]
         # PYUSD needs mint address, decimals and TOKEN_2022_PROGRAM_ID instead of TOKEN_PROGRAM_ID 
@@ -89,7 +90,7 @@ class Coin (Crypto):
         return Keypair()
     
     def get_account_info_json_parsed(self, pub_key):
-        self.client.get_account_info_json_parsed(pub_key).value
+        self.priority_client.get_account_info_json_parsed(pub_key).value
 
     def get_latest_blockhash(self):
         return self.client.get_latest_blockhash().value
@@ -125,7 +126,7 @@ class Coin (Crypto):
 
     def get_rent_amount(self) -> Decimal: 
         """Return min amount of rent to create an ATA in SOL"""
-        min_balance = int(self.client.get_minimum_balance_for_rent_exemption(config['ATA_ACCOUNT_SIZE']).value)
+        min_balance = int(self.priority_client.get_minimum_balance_for_rent_exemption(config['ATA_ACCOUNT_SIZE']).value)
         min_balance = to_sol(min_balance)
         return min_balance
     
@@ -312,14 +313,14 @@ class Coin (Crypto):
 
     def get_account_coin_balance(self, address) -> Decimal:
         """Return coin account balance in SOL"""
-        amount = to_sol(Decimal(self.client.get_balance(Pubkey.from_string(address)).value))
+        amount = to_sol(Decimal(self.priority_client.get_balance(Pubkey.from_string(address)).value))
         return amount
 
     def get_token_decimals(self) -> int:
         """Return number of token decimals from token public address"""
         address = get_token_address(self.symbol)
         pub_key = Pubkey.from_string(address)
-        info = json.loads(self.client.get_account_info_json_parsed(pub_key).value.to_json())
+        info = json.loads(self.priority_client.get_account_info_json_parsed(pub_key).value.to_json())
         decimals = int(info['data']['parsed']['info']['decimals'])
         return decimals
 
@@ -328,7 +329,7 @@ class Coin (Crypto):
         owner_pub_key = Pubkey.from_string(owner_address)
         token_mint_key = Pubkey.from_string(get_token_address(self.symbol))
         account_opts = TokenAccountOpts(mint=token_mint_key)
-        result_array = self.client.get_token_accounts_by_owner_json_parsed(owner_pub_key, account_opts).value
+        result_array = self.priority_client.get_token_accounts_by_owner_json_parsed(owner_pub_key, account_opts).value
         if len(result_array) == 0:
             account_token_address = ''
         else:
@@ -341,7 +342,7 @@ class Coin (Crypto):
         owner_key = Pubkey.from_string(owner_address)
         token_pub_key = Pubkey.from_string(get_token_address(self.symbol))
         fee_payer = Keypair.from_seed(self.get_secret_from_address(self.get_fee_deposit_account_address())[:32])
-        token_inst = Token(self.client, token_pub_key, token_pub_key, fee_payer)
+        token_inst = Token(self.priority_client, token_pub_key, token_pub_key, fee_payer)
         new_address = token_inst.create_associated_token_account(owner_key, token_program_id = self.token_program_id)
         return new_address
         
@@ -350,7 +351,7 @@ class Coin (Crypto):
         owner_pub_key = Pubkey.from_string(owner_address)
         token_mint_key = Pubkey.from_string(get_token_address(self.symbol))
         account_opts = TokenAccountOpts(mint=token_mint_key)
-        result_array = self.client.get_token_accounts_by_owner_json_parsed(owner_pub_key, account_opts).value
+        result_array = self.priority_client.get_token_accounts_by_owner_json_parsed(owner_pub_key, account_opts).value
         if len(result_array) == 0:
             ui_amount = Decimal(0)
         else:
@@ -413,7 +414,7 @@ class Coin (Crypto):
                 )
 
                 tx = VersionedTransaction(msg, [sender_keypair])
-                result = self.client.send_transaction(tx).to_json()
+                result = self.priority_client.send_transaction(tx).to_json()
                 logger.warning(f"Result of transaction {result}")
                 signature = json.loads(result)['result']
 
@@ -453,7 +454,7 @@ class Coin (Crypto):
                     owner_key = Pubkey.from_string(payout['dest'])
                     token_pub_key = Pubkey.from_string(self.token_address)
                     fee_payer = Keypair.from_seed(self.get_secret_from_address(self.get_fee_deposit_account_address())[:32])
-                    token_inst = Token(self.client, token_pub_key, self.token_program_id, fee_payer)
+                    token_inst = Token(self.priority_client, token_pub_key, self.token_program_id, fee_payer)
                     new_address_pubkey = str(token_inst.create_associated_token_account(owner_key))
                     new_address = str(new_address_pubkey)
                     logger.warning(f"Created new ATA {new_address} for account {payout['dest']}")
@@ -515,7 +516,7 @@ class Coin (Crypto):
                 )
                 tx = VersionedTransaction(msg, [owner_pair])
     
-                result = self.client.send_transaction(tx).to_json()
+                result = self.priority_client.send_transaction(tx).to_json()
                 result_json = json.loads(result)
                 logger.warning(f"Result of transaction {result}")
                 txid = str(result_json["result"])
@@ -558,7 +559,7 @@ class Coin (Crypto):
                 recent_blockhash=blockhash,
             )
             tx = VersionedTransaction(msg, [sender_keypair])
-            result = self.client.send_transaction(tx).to_json()
+            result = self.priority_client.send_transaction(tx).to_json()
             logger.warning(f"Result of transaction {result}")
             signature = json.loads(result)['result']
             drain_results.append({
@@ -585,7 +586,7 @@ class Coin (Crypto):
                 owner_key = Pubkey.from_string(destination)
                 token_pub_key = Pubkey.from_string(get_token_address(self.symbol))
                 fee_payer = Keypair.from_seed(self.get_secret_from_address(self.get_fee_deposit_account_address())[:32])
-                token_inst = Token(self.client, token_pub_key, self.token_program_id, fee_payer)
+                token_inst = Token(self.priority_client, token_pub_key, self.token_program_id, fee_payer)
                 new_dest_address = str(token_inst.create_associated_token_account(owner_key))
             else:
                 new_dest_address = associated_token_account
@@ -630,7 +631,7 @@ class Coin (Crypto):
             )
             tx = VersionedTransaction(msg, [owner_pair, fee_payer])
 
-            result = self.client.send_transaction(tx).to_json()
+            result = self.priority_client.send_transaction(tx).to_json()
             result_json = json.loads(result)
             logger.warning(f"Result of transaction {result}")
             txid = str(result_json["result"])
