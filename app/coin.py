@@ -93,7 +93,7 @@ class Coin (Crypto):
         self.priority_client.get_account_info_json_parsed(pub_key).value
 
     def get_latest_blockhash(self):
-        return self.client.get_latest_blockhash().value
+        return self.priority_client.get_latest_blockhash().value
 
     def get_slot(self):
         return int(self.client.get_slot().value)
@@ -119,7 +119,7 @@ class Coin (Crypto):
     def get_transaction(self, tx_sig, encoding='json', commitment=None, max_supported_transaction_version=0):
         if isinstance(tx_sig, str):
             tx_sig = Signature.from_string(tx_sig)
-        return self.client.get_transaction(tx_sig, encoding, commitment, max_supported_transaction_version).value
+        return self.priority_client.get_transaction(tx_sig, encoding, commitment, max_supported_transaction_version).value
 
     def get_multiple_accounts(self, pubkeys, commitment=None, encoding='base64', data_slice=None):
         return self.client.get_multiple_accounts(pubkeys, commitment, encoding, data_slice).value
@@ -293,11 +293,11 @@ class Coin (Crypto):
 
     def get_fee_deposit_coin_balance(self) -> Decimal:
         address = self.get_fee_deposit_account_address()
-        return self.get_account_coin_balance(address)
+        return self.get_account_coin_balance_priority(address)
 
     def get_fee_deposit_token_balance(self) -> Decimal:
         address = self.get_fee_deposit_account_address()
-        return self.get_account_token_balance(address)
+        return self.get_account_token_balance_priority(address)
 
     def to_ui_amount(self, amount) -> Decimal:
         "Return UI amount of tokens (e.g. 0.451) from the smalest token part"
@@ -313,6 +313,11 @@ class Coin (Crypto):
 
     def get_account_coin_balance(self, address) -> Decimal:
         """Return coin account balance in SOL"""
+        amount = to_sol(Decimal(self.client.get_balance(Pubkey.from_string(address)).value))
+        return amount
+    
+    def get_account_coin_balance_priority(self, address) -> Decimal:
+        """Return coin account balance in SOL from priority fullnode"""
         amount = to_sol(Decimal(self.priority_client.get_balance(Pubkey.from_string(address)).value))
         return amount
 
@@ -348,6 +353,22 @@ class Coin (Crypto):
         
     def get_account_token_balance(self, owner_address) -> Decimal:
         """Return obj token balance by owner public address in UI form (e.g. 0.342 USDC)"""
+        owner_pub_key = Pubkey.from_string(owner_address)
+        token_mint_key = Pubkey.from_string(get_token_address(self.symbol))
+        account_opts = TokenAccountOpts(mint=token_mint_key)
+        result_array = self.client.get_token_accounts_by_owner_json_parsed(owner_pub_key, account_opts).value
+        if len(result_array) == 0:
+            ui_amount = Decimal(0)
+        else:
+            json_address = json.loads(result_array[0].to_json())
+            amount = int(json_address["account"]["data"]["parsed"]["info"]["tokenAmount"]["amount"])
+            decimals_number = int(json_address["account"]["data"]["parsed"]["info"]["tokenAmount"]["decimals"])
+            # use decimals from json to minimize requests to the fullnode, also self.to_ui_amount() can be used
+            ui_amount = Decimal(Decimal(amount) / 10 ** decimals_number) 
+        return ui_amount
+    
+    def get_account_token_balance_priority(self, owner_address) -> Decimal:
+        """Return obj token balance by owner public address in UI form (e.g. 0.342 USDC) from priority fullnode"""
         owner_pub_key = Pubkey.from_string(owner_address)
         token_mint_key = Pubkey.from_string(get_token_address(self.symbol))
         account_opts = TokenAccountOpts(mint=token_mint_key)
@@ -534,7 +555,7 @@ class Coin (Crypto):
         drain_results = []
         if self.symbol == "SOL":
             transfer_fee = to_lamports(self.get_coin_transaction_price())
-            sol_ui_amount = self.get_account_coin_balance(account)
+            sol_ui_amount = self.get_account_coin_balance_priority(account)
             if sol_ui_amount < config['MIN_TRANSFER_THRESHOLD']:
                 logger.warning(f"Account amount {sol_ui_amount} is below MIN_TRANSFER_THRESHOLD {config['MIN_TRANSFER_THRESHOLD']}, skip draining")
                 return False
@@ -571,11 +592,11 @@ class Coin (Crypto):
             return drain_results
         else:
             # Token drain
-            ui_amount = self.get_account_token_balance(account)
+            ui_amount = self.get_account_token_balance_priority(account)
             if ui_amount < config['MIN_TOKEN_TRANSFER_THRESHOLD']:
                 logger.warning(f"Account amount {ui_amount} is below MIN_TOKEN_TRANSFER_THRESHOLD {config['MIN_TOKEN_TRANSFER_THRESHOLD']}, skip draining")
                 return False
-            coin_amount = self.get_account_coin_balance(self.get_fee_deposit_account_address())
+            coin_amount = self.get_account_coin_balance_priority(self.get_fee_deposit_account_address())
             drain_fee = self.get_token_transaction_price(destination)
             if drain_fee > coin_amount - self.get_rent_amount():
                 logger.warning("There is not enough SOL on fee-deposit account to pay drain fee, skip draining")
