@@ -3,8 +3,10 @@ from decimal import Decimal
 
 config = {
     'FULLNODE_URL': os.environ.get('FULLNODE_URL', 'http://solana:8545'),
-    'FULLNODE_TIMEOUT': os.environ.get('FULLNODE_TIMEOUT', '60'),
-    'CHECK_NEW_BLOCK_EVERY_SECONDS': os.environ.get('CHECK_NEW_BLOCK_EVERY_SECONDS',2),
+    'FULLNODE_TIMEOUT': int(os.environ.get('FULLNODE_TIMEOUT', '60')),
+    'PRIORITY_FULLNODE_URL': os.environ.get('PRIORITY_FULLNODE_URL', os.environ.get('FULLNODE_URL', 'http://solana:8545')),
+    'PRIORITY_FULLNODE_TIMEOUT': int(os.environ.get('PRIORITY_FULLNODE_TIMEOUT', '60')),
+    'CHECK_NEW_BLOCK_EVERY_SECONDS': int(os.environ.get('CHECK_NEW_BLOCK_EVERY_SECONDS', 2)),
     'EVENTS_MAX_THREADS_NUMBER': int(os.environ.get('EVENTS_MAX_THREADS_NUMBER', 10)),
     'EVENTS_MIN_DIFF_TO_RUN_PARALLEL': int(os.environ.get('EVENTS_MIN_DIFF_TO_RUN_PARALLEL', 30)), #min difference between last checked block and last block
     'CURRENT_SOL_NETWORK': os.environ.get('CURRENT_SOL_NETWORK','devnet'),
