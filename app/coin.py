@@ -476,10 +476,26 @@ class Coin (Crypto):
                     token_pub_key = Pubkey.from_string(self.token_address)
                     fee_payer = Keypair.from_seed(self.get_secret_from_address(self.get_fee_deposit_account_address())[:32])
                     token_inst = Token(self.priority_client, token_pub_key, self.token_program_id, fee_payer)
-                    new_address_pubkey = str(token_inst.create_associated_token_account(owner_key))
+                    new_address_pubkey = str(token_inst.create_associated_token_account(owner_key, 
+                                                                                        skip_confirmation=config['SKIP_ATA_CREATION_TX_CONFIRMATION']))
                     new_address = str(new_address_pubkey)
-                    logger.warning(f"Created new ATA {new_address} for account {payout['dest']}")
-                    payout['dest'] = new_address
+                    logger.warning(f"Send request to create new ATA {new_address} for account {payout['dest']}")
+                    tx_wait = 3
+                    wait_rounds = 10
+                    if config['SKIP_ATA_CREATION_TX_CONFIRMATION']:
+                        for i in range(10):
+                            new_associated_token_account = self.get_token_account_by_owner(payout['dest'])                    
+                            if not new_associated_token_account:
+                                logger.warning(f"Waiting {i+1} of {wait_rounds} for {tx_wait} sec to let the transaction propagate")
+                                time.sleep(tx_wait) # wait to let the transaction propagate
+                            else:
+                                logger.warning(f"New ATA {new_associated_token_account} for account {payout['dest']} was created")
+                                break
+                    new_associated_token_account = self.get_token_account_by_owner(payout['dest'])                    
+                    if not new_associated_token_account:
+                        raise Exception(f"Failed to create associated token account for {payout['dest']}, aborting multipayout")
+                    else:
+                        payout['dest'] = new_associated_token_account
                 else:
                     payout['dest'] = associated_token_account
             source_pub = Pubkey.from_string(self.get_token_account_by_owner(self.get_fee_deposit_account_address()))

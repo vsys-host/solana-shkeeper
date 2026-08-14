@@ -4,6 +4,7 @@ from decimal import Decimal
 config = {
     'FULLNODE_URL': os.environ.get('FULLNODE_URL', 'http://solana:8545'),
     'FULLNODE_TIMEOUT': int(os.environ.get('FULLNODE_TIMEOUT', '60')),
+    'SKIP_ATA_CREATION_TX_CONFIRMATION': os.environ.get('SKIP_ATA_CREATION_TX_CONFIRMATION', 'False').lower() in ['true', '1', 't'],
     'PRIORITY_FULLNODE_URL': os.environ.get('PRIORITY_FULLNODE_URL', os.environ.get('FULLNODE_URL', 'http://solana:8545')),
     'PRIORITY_FULLNODE_TIMEOUT': int(os.environ.get('PRIORITY_FULLNODE_TIMEOUT', '60')),
     'CHECK_NEW_BLOCK_EVERY_SECONDS': int(os.environ.get('CHECK_NEW_BLOCK_EVERY_SECONDS', 2)),
