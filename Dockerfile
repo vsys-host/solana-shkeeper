@@ -7,7 +7,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Fix some solana RPC nodes reply to avoid solders.SerdeJSONError
+### Fix some solana RPC nodes reply to avoid solders.SerdeJSONError
 
 RUN sed -i '96i\    raw = raw.replace("\\\"readonly\\\":null", "\\\"readonly\\\":[]")' /usr/local/lib/python3.13/site-packages/solana/rpc/providers/core.py
 RUN sed -i '97i\    raw = raw.replace("\\\"writable\\\":null", "\\\"writable\\\":[]")' /usr/local/lib/python3.13/site-packages/solana/rpc/providers/core.py
+
+### rewardType = DeactivatedStake not implemented in solders library, so we replace it with Staking to avoid solders.SerdeJSONError
+RUN sed -i '98i\    raw = raw.replace("\\\"rewards\\\":null", "\\\"rewards\\\":[]")' /usr/local/lib/python3.13/site-packages/solana/rpc/providers/core.py
+RUN sed -i '99i\    raw = raw.replace("\\\"rewardType\\\":\\\"DeactivatedStake\\\"", "\\\"rewardType\\\":\\\"Staking\\\"")' /usr/local/lib/python3.13/site-packages/solana/rpc/providers/core.py
+
+
