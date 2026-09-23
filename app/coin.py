@@ -98,7 +98,7 @@ class Coin (Crypto):
     def get_slot(self):
         return int(self.client.get_slot().value)
 
-    def get_block(self, slot, encoding='json', max_supported_transaction_version=0 ):
+    def get_block(self, slot, encoding='json', max_supported_transaction_version=1):
         data = self.client.get_block(int(slot), encoding, max_supported_transaction_version).value
         return data
 
@@ -116,7 +116,7 @@ class Coin (Crypto):
     def get_signatures_for_address(self, pub_address, before=None, until=None, limit=None, commitment=None):
         return self.client.get_signatures_for_address(Pubkey.from_string(pub_address), before, until, limit, commitment)
 
-    def get_transaction(self, tx_sig, encoding='json', commitment=None, max_supported_transaction_version=0):
+    def get_transaction(self, tx_sig, encoding='json', commitment=None, max_supported_transaction_version=1):
         if isinstance(tx_sig, str):
             tx_sig = Signature.from_string(tx_sig)
         return self.priority_client.get_transaction(tx_sig, encoding, commitment, max_supported_transaction_version).value
